@@ -440,6 +440,14 @@ export function rmCard(
 export const DEFAULT_CARD_PROMPT =
   "start by reading abc/PLAN.md and execute on the contents. note: abc/ is gitignored.";
 
+function requireAbcdSocket(library: string): string {
+  const socketPath = join(library, "abcd.sock");
+  if (!existsSync(socketPath)) {
+    throw new Error(`abcd is not running (missing ${socketPath})`);
+  }
+  return socketPath;
+}
+
 export function runCardCommand(
   library: string,
   id: string,
@@ -449,6 +457,7 @@ export function runCardCommand(
   if (isLockHeld(paths.lockPath)) {
     throw new Error(`Card "${id}" is already running`);
   }
+  const socketPath = requireAbcdSocket(library);
   mkdirSync(dirname(paths.lockPath), { recursive: true });
   mkdirSync(join(library, "sessions"), { recursive: true });
 
@@ -466,6 +475,8 @@ export function runCardCommand(
     join(library, "sessions"),
     "--session-id",
     id,
+    "--abcd-socket",
+    socketPath,
     "--event-log",
     paths.eventLogPath,
     "--card-id",
@@ -491,6 +502,7 @@ export function openPiCommand(
   if (isLockHeld(paths.lockPath)) {
     throw new Error(`Card "${id}" is already running`);
   }
+  const socketPath = requireAbcdSocket(library);
   mkdirSync(dirname(paths.lockPath), { recursive: true });
   mkdirSync(join(library, "sessions"), { recursive: true });
 
@@ -508,6 +520,8 @@ export function openPiCommand(
     join(library, "sessions"),
     "--session-id",
     id,
+    "--abcd-socket",
+    socketPath,
     "--event-log",
     paths.eventLogPath,
     "--card-id",
@@ -594,11 +608,6 @@ export function runCli(argv: string[]): number {
       throw res.error;
     }
     return res.status ?? 1;
-  }
-
-  if (first === "ui") {
-    console.error("abc ui is not implemented yet");
-    return 1;
   }
 
   const target = first;

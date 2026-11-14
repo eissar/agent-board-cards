@@ -1,46 +1,15 @@
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  writeSync,
-} from "node:fs";
-import { dirname } from "node:path";
+import { connect, type Socket } from "node:net";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import {
-  type EmittedOpenHandsEvent,
-  type OpenHandsEvent,
-  parseEventLog,
-} from "../event_log.ts";
-import {
-  OpenHandsReducer,
-  type ReducerAgentSessionEvent,
-} from "../reducer.ts";
-
-function appendEvents(
-  eventLogPath: string,
-  emitted: readonly EmittedOpenHandsEvent[],
-): void {
-  if (emitted.length === 0) {
-    return;
-  }
-  mkdirSync(dirname(eventLogPath), { recursive: true });
-  const fd = openSync(eventLogPath, "a");
-  try {
-    const payload = emitted.map((evt) => `${JSON.stringify(evt)}\n`).join("");
-    writeSync(fd, payload);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-}
+import type { ReducerAgentSessionEvent } from "../reducer.ts";
 
 export default function abcSessionExtension(pi: ExtensionAPI): void {
+  pi.registerFlag("abcd-socket", {
+    description: "Path to abcd Unix domain socket",
+    type: "string",
+  });
   pi.registerFlag("event-log", {
     description: "Path to OpenHands EventLog JSONL (abc/<id>.jsonl)",
     type: "string",
@@ -50,14 +19,11 @@ export default function abcSessionExtension(pi: ExtensionAPI): void {
     type: "string",
   });
 
+  let socket: Socket | undefined;
   let eventLogPath: string | undefined;
-  let reducer: OpenHandsReducer | undefined;
+  let cardId: string | undefined;
 
-  function ensureInitialized(ctx: ExtensionContext): boolean {
-    if (reducer && eventLogPath) {
-      return true;
-    }
-
+  async function ensureConnected(ctx: ExtensionContext): Promise<void> {
     const flagLog = pi.getFlag("event-log");
     const resolvedLog =
       typeof flagLog === "string" && flagLog.length > 0
@@ -65,60 +31,83 @@ export default function abcSessionExtension(pi: ExtensionAPI): void {
         : process.env.ABC_EVENT_LOG;
 
     if (!resolvedLog) {
-      return false;
+      return;
+    }
+
+    if (socket && !socket.destroyed) {
+      return;
+    }
+
+    const flagSock = pi.getFlag("abcd-socket");
+    const socketPath =
+      (typeof flagSock === "string" && flagSock.length > 0
+        ? flagSock
+        : undefined) ?? process.env.ABC_SOCKET;
+
+    if (!socketPath) {
+      throw new Error("Fatal precondition: abcd socket not configured (--abcd-socket or ABC_SOCKET)");
     }
 
     const flagCardId = pi.getFlag("card-id");
-    const cardId =
+    cardId =
       (typeof flagCardId === "string" && flagCardId.length > 0
         ? flagCardId
         : undefined) ??
       process.env.ABC_CARD_ID ??
       ctx.sessionManager.getSessionId();
-
-    const initialEvents: OpenHandsEvent[] = [];
-    if (existsSync(resolvedLog)) {
-      const content = readFileSync(resolvedLog, "utf8");
-      if (content.trim().length > 0) {
-        initialEvents.push(...parseEventLog(content));
-      }
-    }
-
     eventLogPath = resolvedLog;
-    reducer = new OpenHandsReducer({ cardId, initialEvents });
-    return true;
+
+    await new Promise<void>((resolve, reject) => {
+      const client = connect(socketPath);
+      const onError = (err: Error) => {
+        client.destroy();
+        reject(new Error(`Fatal precondition: abcd unavailable at ${socketPath}: ${err.message}`));
+      };
+      client.once("error", onError);
+      client.once("connect", () => {
+        client.off("error", onError);
+        client.on("error", (err) => {
+          console.error(`[pi-session-mgr] abcd socket error: ${err.message}`);
+          process.exit(1);
+        });
+        socket = client;
+        resolve();
+      });
+    });
   }
 
-  function handle(
-    event: ReducerAgentSessionEvent,
-    ctx: ExtensionContext,
-  ): void {
-    if (!ensureInitialized(ctx) || !reducer || !eventLogPath) {
+  function forward(event: ReducerAgentSessionEvent): void {
+    if (!eventLogPath || !cardId) {
       return;
     }
-    const emitted = reducer.reduce(event);
-    appendEvents(eventLogPath, emitted);
+    if (!socket || socket.destroyed) {
+      throw new Error("Fatal precondition: lost connection to abcd");
+    }
+    socket.write(`${JSON.stringify({ cardId, eventLogPath, event })}\n`);
   }
 
-  pi.on("session_start", (_event, ctx) => {
-    reducer = undefined;
-    eventLogPath = undefined;
-    ensureInitialized(ctx);
+  pi.on("session_start", async (_event, ctx) => {
+    try {
+      await ensureConnected(ctx);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
   });
 
-  pi.on("agent_start", (event, ctx) => {
-    handle(event as unknown as ReducerAgentSessionEvent, ctx);
+  pi.on("agent_start", (event) => {
+    forward(event as unknown as ReducerAgentSessionEvent);
   });
 
-  pi.on("message_end", (event, ctx) => {
-    handle(event as unknown as ReducerAgentSessionEvent, ctx);
+  pi.on("message_end", (event) => {
+    forward(event as unknown as ReducerAgentSessionEvent);
   });
 
-  pi.on("tool_execution_end", (event, ctx) => {
-    handle(event as unknown as ReducerAgentSessionEvent, ctx);
+  pi.on("tool_execution_end", (event) => {
+    forward(event as unknown as ReducerAgentSessionEvent);
   });
 
-  pi.on("agent_settled", (event, ctx) => {
-    handle(event as unknown as ReducerAgentSessionEvent, ctx);
+  pi.on("agent_settled", (event) => {
+    forward(event as unknown as ReducerAgentSessionEvent);
   });
 }

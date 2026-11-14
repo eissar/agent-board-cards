@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "abc": "./abc.ts"
+    "abc": "./abc.ts",
+    "abcd": "./abcd.ts"
   },
   "scripts": {
     "test": "bun test"
