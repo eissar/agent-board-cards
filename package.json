@@ -2,6 +2,9 @@
   "name": "abc",
   "private": true,
   "type": "module",
+  "bin": {
+    "abc": "./abc.ts"
+  },
   "scripts": {
     "test": "bun test"
   },
