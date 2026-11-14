@@ -468,15 +468,60 @@ export function runCardCommand(
   child.unref();
 }
 
+export function openPiCommand(
+  library: string,
+  id: string,
+  extraArgs: string[] = [],
+): number {
+  const paths = resolveCard(library, id);
+  if (isLockHeld(paths.lockPath)) {
+    throw new Error(`Card "${id}" is already running`);
+  }
+  mkdirSync(dirname(paths.lockPath), { recursive: true });
+  mkdirSync(join(library, "sessions"), { recursive: true });
+
+  const selfDir = dirname(fileURLToPath(import.meta.url));
+  const extensionDir = resolve(selfDir, "pi-session-mgr");
+  const piBin = process.env.ABC_PI_BIN ?? "pi";
+
+  const args = [
+    "-n",
+    paths.lockPath,
+    piBin,
+    "-e",
+    extensionDir,
+    "--session-dir",
+    join(library, "sessions"),
+    "--session-id",
+    id,
+    "--event-log",
+    paths.eventLogPath,
+    "--card-id",
+    id,
+    ...extraArgs,
+  ];
+
+  const res = spawnSync("flock", args, {
+    cwd: paths.worktreePath,
+    stdio: "inherit",
+  });
+  if (res.error) {
+    throw res.error;
+  }
+  return res.status ?? 1;
+}
+
 function usage(): string {
   return [
     "Usage:",
     "  abc [--library <dir>] root",
+    "  abc [--library <dir>] pi [args...]",
     "  abc [--library <dir>] <remote> add",
     "  abc [--library <dir>] <remote> run [prompt]",
     "  abc [--library <dir>] <id|repo> ls [--json]",
     "  abc [--library <dir>] <id> root",
     "  abc [--library <dir>] <id> run [prompt]",
+    "  abc [--library <dir>] <id> pi [args...]",
     "  abc [--library <dir>] <id> stop",
     "  abc [--library <dir>] <id> rm [--force]",
   ].join("\n");
@@ -519,6 +564,22 @@ export function runCli(argv: string[]): number {
   if (first === "root") {
     console.log(library);
     return 0;
+  }
+
+  if (first === "pi") {
+    const selfDir = dirname(fileURLToPath(import.meta.url));
+    const extensionDir = resolve(selfDir, "pi-session-mgr");
+    const piBin = process.env.ABC_PI_BIN ?? "pi";
+    const extra = rest[1] === "--" ? rest.slice(2) : rest.slice(1);
+    const res = spawnSync(
+      piBin,
+      ["-e", extensionDir, "--session-dir", join(library, "sessions"), ...extra],
+      { stdio: "inherit" },
+    );
+    if (res.error) {
+      throw res.error;
+    }
+    return res.status ?? 1;
   }
 
   if (first === "ui") {
@@ -584,6 +645,9 @@ export function runCli(argv: string[]): number {
         console.log(target);
       }
       return 0;
+    }
+    case "pi": {
+      return openPiCommand(library, target, rest.slice(2));
     }
     case "stop": {
       const result = stopCard(library, target);
