@@ -15,15 +15,16 @@ Vendored Python event envelope files in `vendor/openhands/v1.62.0/event/` are fr
 
 Worktree library (e.g. `~/.local/share/abc/default/`):
 - `repos/<host>/<owner>/<repo>/` — bare clone of the remote URL (shared object store); the base commit ref is the merge head in this repo
+- `repos/<host>/<owner>/<repo>/info/exclude` — excludes `abc/` across all worktrees of this repo
 - `repos/<host>/<owner>/<repo>/abc/<id>.jsonl` — OpenHands `EventLog` (lives inside the bare repo, not inside the worktree)
 - `repos/<host>/<owner>/<repo>/abc/<id>.pid` — pidfile of the agent process running the card; absent or dead pid means not running, whatever the log says
-- `repos/<host>/<owner>/<repo>/abc/hooks.json` — lifecycle hooks, per repo (outside the worktree so a sandbox such as nono can protect them independently of writable worktree contents; placement enables, rather than enforces, that boundary)
+- `repos/<host>/<owner>/<repo>/abc/hooks.json` — lifecycle hooks, per repo
 - `sessions/<timestamp>_<id>.jsonl` — Pi session, owns the agent's memory across rounds and the card's display title; status comes only from the `EventLog`
 - `worktrees/<id>/` — `git worktree` branched from `repos/<host>/<owner>/<repo>/` (never based on a local repo)
 
-`<id>` is the card id: the first 5 hex characters of a random UUID. Scan retained Pi session logs first and retry until the id is unused. Then panic if `worktrees/<id>/` already exists: a worktree conflict is an invariant violation, not another retry condition. No atomic ID reservation machinery is needed.
+`<id>` is the card id: the first 5 hex characters of a random UUID, retried while `<id>` exists in `sessions/` or `worktrees/`.
 
-Inside each worktree (`abc/` excluded via `git rev-parse --git-path info/exclude`):
+Inside each worktree:
 - `abc/PLAN.md`
 
 Launch:
