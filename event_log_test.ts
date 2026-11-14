@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { expect, test } from "bun:test";
 import {
   ExecutionStatus,
   parseEventLog,
@@ -8,7 +8,7 @@ import {
   validateEventEnvelope,
 } from "./event_log.ts";
 
-Deno.test("validateEventEnvelope rejects reserved ROOT_PARENT_ID as event id", () => {
+test("validateEventEnvelope rejects reserved ROOT_PARENT_ID as event id", () => {
   const invalid = {
     id: ROOT_PARENT_ID,
     timestamp: "2026-11-14T18:00:00.000Z",
@@ -16,50 +16,47 @@ Deno.test("validateEventEnvelope rejects reserved ROOT_PARENT_ID as event id", (
     parent_id: null,
     kind: "MessageEvent",
   };
-  assertEquals(validateEventEnvelope(invalid), false);
+  expect(validateEventEnvelope(invalid)).toBe(false);
 });
 
-Deno.test("validateEventEnvelope rejects missing or empty kind", () => {
+test("validateEventEnvelope rejects missing or empty kind", () => {
   const base = {
     id: "evt-1",
     timestamp: "2026-11-14T18:00:00.000Z",
     source: "agent",
     parent_id: null,
   };
-  assertEquals(validateEventEnvelope(base), false);
-  assertEquals(validateEventEnvelope({ ...base, kind: "" }), false);
-  assertEquals(
-    validateEventEnvelope({ ...base, kind: "FutureUnknownEvent" }),
+  expect(validateEventEnvelope(base)).toBe(false);
+  expect(validateEventEnvelope({ ...base, kind: "" })).toBe(false);
+  expect(validateEventEnvelope({ ...base, kind: "FutureUnknownEvent" })).toBe(
     true,
   );
 });
 
-Deno.test("validateEmittedEvent enforces strict v1.62.0 schemas and rejects unknown kinds", () => {
+test("validateEmittedEvent enforces strict v1.62.0 schemas and rejects unknown kinds", () => {
   const base = {
     id: "evt-1",
     timestamp: "2026-11-14T18:00:00.000Z",
     parent_id: null,
   };
 
-  assertEquals(
+  expect(
     validateEmittedEvent({
       ...base,
       source: "agent",
       kind: "CustomUnknownEvent",
     }),
-    false,
-  );
+  ).toBe(false);
 
-  assertEquals(
+  expect(
     validateEmittedEvent({
       ...base,
       source: "environment",
       kind: "ConversationErrorEvent",
     }),
-    false,
-  );
+  ).toBe(false);
 
-  assertEquals(
+  expect(
     validateEmittedEvent({
       ...base,
       source: "environment",
@@ -67,10 +64,9 @@ Deno.test("validateEmittedEvent enforces strict v1.62.0 schemas and rejects unkn
       code: "rate_limit",
       detail: "429 Too Many Requests",
     }),
-    true,
-  );
+  ).toBe(true);
 
-  assertEquals(
+  expect(
     validateEmittedEvent({
       ...base,
       source: "user",
@@ -81,10 +77,9 @@ Deno.test("validateEmittedEvent enforces strict v1.62.0 schemas and rejects unkn
       },
       llm_response_id: null,
     }),
-    true,
-  );
+  ).toBe(true);
 
-  assertEquals(
+  expect(
     validateEmittedEvent({
       ...base,
       source: "agent",
@@ -99,10 +94,9 @@ Deno.test("validateEmittedEvent enforces strict v1.62.0 schemas and rejects unkn
       },
       llm_response_id: "resp-1",
     }),
-    true,
-  );
+  ).toBe(true);
 
-  assertEquals(
+  expect(
     validateEmittedEvent({
       ...base,
       source: "environment",
@@ -114,11 +108,10 @@ Deno.test("validateEmittedEvent enforces strict v1.62.0 schemas and rejects unkn
         content: [{ type: "text", text: "file contents" }],
       },
     }),
-    true,
-  );
+  ).toBe(true);
 });
 
-Deno.test("parseEventLog tolerates unknown event kinds on read but rejects invalid envelopes", () => {
+test("parseEventLog tolerates unknown event kinds on read but rejects invalid envelopes", () => {
   const validLog = [
     JSON.stringify({
       id: "evt-1",
@@ -131,10 +124,10 @@ Deno.test("parseEventLog tolerates unknown event kinds on read but rejects inval
   ].join("\n");
 
   const parsed = parseEventLog(validLog);
-  assertEquals(parsed.length, 1);
-  assertEquals(parsed[0].kind, "SomeFutureEvent");
+  expect(parsed.length).toBe(1);
+  expect(parsed[0].kind).toBe("SomeFutureEvent");
 
-  assertThrows(() =>
+  expect(() =>
     parseEventLog(
       JSON.stringify({
         id: "evt-1",
@@ -143,18 +136,18 @@ Deno.test("parseEventLog tolerates unknown event kinds on read but rejects inval
         parent_id: null,
       }),
     )
-  );
+  ).toThrow();
 });
 
-Deno.test("projectExecutionStatus folds OpenHands-style events into ExecutionStatus", () => {
+test("projectExecutionStatus folds OpenHands-style events into ExecutionStatus", () => {
   const base = {
     timestamp: "2026-11-14T18:00:00.000Z",
     parent_id: null,
   };
 
-  assertEquals(projectExecutionStatus([]), ExecutionStatus.IDLE);
+  expect(projectExecutionStatus([])).toBe(ExecutionStatus.IDLE);
 
-  assertEquals(
+  expect(
     projectExecutionStatus([
       {
         ...base,
@@ -164,10 +157,9 @@ Deno.test("projectExecutionStatus folds OpenHands-style events into ExecutionSta
         llm_message: { role: "user", content: [{ type: "text", text: "hi" }] },
       },
     ]),
-    ExecutionStatus.RUNNING,
-  );
+  ).toBe(ExecutionStatus.RUNNING);
 
-  assertEquals(
+  expect(
     projectExecutionStatus([
       {
         ...base,
@@ -181,10 +173,9 @@ Deno.test("projectExecutionStatus folds OpenHands-style events into ExecutionSta
         llm_response_id: "resp-1",
       },
     ]),
-    ExecutionStatus.RUNNING,
-  );
+  ).toBe(ExecutionStatus.RUNNING);
 
-  assertEquals(
+  expect(
     projectExecutionStatus([
       {
         ...base,
@@ -204,10 +195,9 @@ Deno.test("projectExecutionStatus folds OpenHands-style events into ExecutionSta
         kind: "PauseEvent",
       },
     ]),
-    ExecutionStatus.PAUSED,
-  );
+  ).toBe(ExecutionStatus.PAUSED);
 
-  assertEquals(
+  expect(
     projectExecutionStatus([
       {
         ...base,
@@ -218,10 +208,9 @@ Deno.test("projectExecutionStatus folds OpenHands-style events into ExecutionSta
         detail: "boom",
       },
     ]),
-    ExecutionStatus.ERROR,
-  );
+  ).toBe(ExecutionStatus.ERROR);
 
-  assertEquals(
+  expect(
     projectExecutionStatus([
       {
         ...base,
@@ -232,6 +221,5 @@ Deno.test("projectExecutionStatus folds OpenHands-style events into ExecutionSta
         value: ExecutionStatus.WAITING_FOR_CONFIRMATION,
       },
     ]),
-    ExecutionStatus.WAITING_FOR_CONFIRMATION,
-  );
+  ).toBe(ExecutionStatus.WAITING_FOR_CONFIRMATION);
 });

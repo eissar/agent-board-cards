@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { expect, test } from "bun:test";
 import {
   type ActionEvent,
   type EmittedOpenHandsEvent,
@@ -20,27 +20,30 @@ function runSequence(
   return out;
 }
 
-function assertMonotonicChain(events: readonly EmittedOpenHandsEvent[], cardId: string): void {
+function assertMonotonicChain(
+  events: readonly EmittedOpenHandsEvent[],
+  cardId: string,
+): void {
   let prevId: string | null = null;
   let prevTs = 0;
 
   for (let i = 0; i < events.length; i++) {
     const evt = events[i];
-    assertEquals(validateEmittedEvent(evt), true);
-    assertEquals(evt.id === ROOT_PARENT_ID, false);
-    assertEquals(evt.id.startsWith(`${cardId}-`), true);
-    assertEquals(evt.parent_id, prevId);
+    expect(validateEmittedEvent(evt)).toBe(true);
+    expect(evt.id === ROOT_PARENT_ID).toBe(false);
+    expect(evt.id.startsWith(`${cardId}-`)).toBe(true);
+    expect(evt.parent_id).toBe(prevId);
 
     const ts = Date.parse(evt.timestamp);
-    assertEquals(ts > prevTs, true);
+    expect(ts > prevTs).toBe(true);
 
     prevId = evt.id;
     prevTs = ts;
   }
 }
 
-Deno.test("reducer: agent_start -> running, agent_end(willRetry) stays running, agent_settled -> finished", () => {
-  let clock = 1_700_000_000_000;
+test("reducer: agent_start -> running, agent_end(willRetry) stays running, agent_settled -> finished", () => {
+  const clock = 1_700_000_000_000;
   const reducer = new OpenHandsReducer({
     cardId: "a1b2c",
     now: () => clock,
@@ -63,11 +66,11 @@ Deno.test("reducer: agent_start -> running, agent_end(willRetry) stays running, 
     },
   ]);
 
-  assertEquals(projectExecutionStatus(startEvents), ExecutionStatus.RUNNING);
-  assertEquals(startEvents.length, 2);
-  assertEquals(startEvents[0].kind, "ConversationStateUpdateEvent");
-  assertEquals(startEvents[1].kind, "MessageEvent");
-  assertEquals(startEvents[1].source, "user");
+  expect(projectExecutionStatus(startEvents)).toBe(ExecutionStatus.RUNNING);
+  expect(startEvents.length).toBe(2);
+  expect(startEvents[0].kind).toBe("ConversationStateUpdateEvent");
+  expect(startEvents[1].kind).toBe("MessageEvent");
+  expect(startEvents[1].source).toBe("user");
 
   const endEvents = runSequence(reducer, [
     {
@@ -85,15 +88,15 @@ Deno.test("reducer: agent_start -> running, agent_end(willRetry) stays running, 
 
   const all = [...startEvents, ...endEvents];
   assertMonotonicChain(all, "a1b2c");
-  assertEquals(projectExecutionStatus(all), ExecutionStatus.FINISHED);
-  assertEquals(endEvents.map((e) => e.kind), [
+  expect(projectExecutionStatus(all)).toBe(ExecutionStatus.FINISHED);
+  expect(endEvents.map((e) => e.kind)).toEqual([
     "MessageEvent",
     "ConversationStateUpdateEvent",
   ]);
-  assertEquals(endEvents[0].source, "agent");
+  expect(endEvents[0].source).toBe("agent");
 });
 
-Deno.test("reducer: aborted agent_settled -> paused (InterruptEvent)", () => {
+test("reducer: aborted agent_settled -> paused (InterruptEvent)", () => {
   const reducer = new OpenHandsReducer({
     cardId: "dead1",
     now: () => 1_700_000_000_000,
@@ -109,12 +112,12 @@ Deno.test("reducer: aborted agent_settled -> paused (InterruptEvent)", () => {
   ]);
 
   assertMonotonicChain(events, "dead1");
-  assertEquals(events[events.length - 1].kind, "InterruptEvent");
-  assertEquals(events[events.length - 1].source, "user");
-  assertEquals(projectExecutionStatus(events), ExecutionStatus.PAUSED);
+  expect(events[events.length - 1].kind).toBe("InterruptEvent");
+  expect(events[events.length - 1].source).toBe("user");
+  expect(projectExecutionStatus(events)).toBe(ExecutionStatus.PAUSED);
 });
 
-Deno.test("reducer: error then successful retry -> finished (never error)", () => {
+test("reducer: error then successful retry -> finished (never error)", () => {
   const reducer = new OpenHandsReducer({
     cardId: "ret01",
     now: () => 1_700_000_000_000,
@@ -148,14 +151,11 @@ Deno.test("reducer: error then successful retry -> finished (never error)", () =
   ]);
 
   assertMonotonicChain(events, "ret01");
-  assertEquals(
-    events.some((e) => e.kind === "ConversationErrorEvent"),
-    false,
-  );
-  assertEquals(projectExecutionStatus(events), ExecutionStatus.FINISHED);
+  expect(events.some((e) => e.kind === "ConversationErrorEvent")).toBe(false);
+  expect(projectExecutionStatus(events)).toBe(ExecutionStatus.FINISHED);
 });
 
-Deno.test("reducer: retries exhausted -> ConversationErrorEvent + error status", () => {
+test("reducer: retries exhausted -> ConversationErrorEvent + error status", () => {
   const reducer = new OpenHandsReducer({
     cardId: "err01",
     now: () => 1_700_000_000_000,
@@ -186,15 +186,15 @@ Deno.test("reducer: retries exhausted -> ConversationErrorEvent + error status",
 
   assertMonotonicChain(events, "err01");
   const errorEvt = events.find((e) => e.kind === "ConversationErrorEvent");
-  assertEquals(errorEvt?.kind, "ConversationErrorEvent");
+  expect(errorEvt?.kind).toBe("ConversationErrorEvent");
   if (errorEvt?.kind === "ConversationErrorEvent") {
-    assertEquals(errorEvt.code, "overloaded");
-    assertEquals(errorEvt.detail, "529 Overloaded");
+    expect(errorEvt.code).toBe("overloaded");
+    expect(errorEvt.detail).toBe("529 Overloaded");
   }
-  assertEquals(projectExecutionStatus(events), ExecutionStatus.ERROR);
+  expect(projectExecutionStatus(events)).toBe(ExecutionStatus.ERROR);
 });
 
-Deno.test("reducer: tool-calling reply emits ActionEvents (no MessageEvent), links ObservationEvent & AgentErrorEvent", () => {
+test("reducer: tool-calling reply emits ActionEvents (no MessageEvent), links ObservationEvent & AgentErrorEvent", () => {
   const reducer = new OpenHandsReducer({
     cardId: "tool1",
     now: () => 1_700_000_000_000,
@@ -255,34 +255,38 @@ Deno.test("reducer: tool-calling reply emits ActionEvents (no MessageEvent), lin
   const assistantMessages = events.filter(
     (e) => e.kind === "MessageEvent" && e.source === "agent",
   );
-  assertEquals(assistantMessages.length, 0);
+  expect(assistantMessages.length).toBe(0);
 
   const actions = events.filter((e) => e.kind === "ActionEvent") as ActionEvent[];
-  assertEquals(actions.length, 2);
-  assertEquals(actions[0].thought, [{ type: "text", text: "Let me read both files." }]);
-  assertEquals(actions[1].thought, []);
-  assertEquals(actions[0].llm_response_id, "resp-tools");
-  assertEquals(actions[1].llm_response_id, "resp-tools");
+  expect(actions.length).toBe(2);
+  expect(actions[0].thought).toEqual([
+    { type: "text", text: "Let me read both files." },
+  ]);
+  expect(actions[1].thought).toEqual([]);
+  expect(actions[0].llm_response_id).toBe("resp-tools");
+  expect(actions[1].llm_response_id).toBe("resp-tools");
 
   const obs = events.find((e) => e.kind === "ObservationEvent");
-  assertEquals(obs?.kind, "ObservationEvent");
+  expect(obs?.kind).toBe("ObservationEvent");
   if (obs?.kind === "ObservationEvent") {
-    assertEquals(obs.action_id, actions[0].id);
-    assertEquals(obs.tool_call_id, "tc-1");
-    assertEquals(obs.observation.content, [{ type: "text", text: "hello world" }]);
+    expect(obs.action_id).toBe(actions[0].id);
+    expect(obs.tool_call_id).toBe("tc-1");
+    expect(obs.observation.content).toEqual([
+      { type: "text", text: "hello world" },
+    ]);
   }
 
   const toolErr = events.find((e) => e.kind === "AgentErrorEvent");
-  assertEquals(toolErr?.kind, "AgentErrorEvent");
+  expect(toolErr?.kind).toBe("AgentErrorEvent");
   if (toolErr?.kind === "AgentErrorEvent") {
-    assertEquals(toolErr.tool_call_id, "tc-2");
-    assertEquals(toolErr.error, "ENOENT: no such file");
+    expect(toolErr.tool_call_id).toBe("tc-2");
+    expect(toolErr.error).toBe("ENOENT: no such file");
   }
 
-  assertEquals(projectExecutionStatus(events), ExecutionStatus.FINISHED);
+  expect(projectExecutionStatus(events)).toBe(ExecutionStatus.FINISHED);
 });
 
-Deno.test("reducer: continues seq, parent_id, and timestamp across rounds", () => {
+test("reducer: continues seq, parent_id, and timestamp across rounds", () => {
   const round1 = new OpenHandsReducer({
     cardId: "rnd01",
     now: () => 1_700_000_000_000,
@@ -296,7 +300,7 @@ Deno.test("reducer: continues seq, parent_id, and timestamp across rounds", () =
   const round2 = new OpenHandsReducer({
     cardId: "rnd01",
     initialEvents: firstEvents,
-    now: () => 1_700_000_000_000, // even if clock hasn't advanced, timestamps stay monotonic
+    now: () => 1_700_000_000_000,
   });
   const secondEvents = runSequence(round2, [
     { type: "agent_start" },
@@ -306,11 +310,13 @@ Deno.test("reducer: continues seq, parent_id, and timestamp across rounds", () =
 
   const combined = [...firstEvents, ...secondEvents];
   assertMonotonicChain(combined, "rnd01");
-  assertEquals(secondEvents[0].id, "rnd01-4");
-  assertEquals(secondEvents[0].parent_id, firstEvents[firstEvents.length - 1].id);
+  expect(secondEvents[0].id).toBe("rnd01-4");
+  expect(secondEvents[0].parent_id).toBe(
+    firstEvents[firstEvents.length - 1].id,
+  );
 });
 
-Deno.test("reducer: wrapUIContext emits waiting_for_confirmation then running", async () => {
+test("reducer: wrapUIContext emits waiting_for_confirmation then running", async () => {
   const reducer = new OpenHandsReducer({
     cardId: "ui001",
     now: () => 1_700_000_000_000,
@@ -326,21 +332,20 @@ Deno.test("reducer: wrapUIContext emits waiting_for_confirmation then running", 
   );
 
   const confirmed = await wrapped.confirm("Proceed?", "Confirm action");
-  assertEquals(confirmed, true);
+  expect(confirmed).toBe(true);
   const selected = await wrapped.select("Pick one", ["a", "b"]);
-  assertEquals(selected, "a");
+  expect(selected).toBe("a");
 
   assertMonotonicChain(emitted, "ui001");
-  assertEquals(emitted.length, 4);
-  assertEquals(
+  expect(emitted.length).toBe(4);
+  expect(
     emitted.map((e) =>
       e.kind === "ConversationStateUpdateEvent" ? e.value : e.kind
     ),
-    [
-      ExecutionStatus.WAITING_FOR_CONFIRMATION,
-      ExecutionStatus.RUNNING,
-      ExecutionStatus.WAITING_FOR_CONFIRMATION,
-      ExecutionStatus.RUNNING,
-    ],
-  );
+  ).toEqual([
+    ExecutionStatus.WAITING_FOR_CONFIRMATION,
+    ExecutionStatus.RUNNING,
+    ExecutionStatus.WAITING_FOR_CONFIRMATION,
+    ExecutionStatus.RUNNING,
+  ]);
 });
