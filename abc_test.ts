@@ -103,6 +103,30 @@ describe("abc CLI", () => {
       ref: undefined,
     });
 
+    expect(parseRemoteSpecifier("eissar/booru#main")).toEqual({
+      cloneUrl: "https://github.com/eissar/booru",
+      host: "github.com",
+      repoPath: "eissar/booru",
+      ref: "main",
+    });
+
+    const prevHost = process.env.ABC_DEFAULT_HOST;
+    try {
+      process.env.ABC_DEFAULT_HOST = "https://gitlab.example.com";
+      expect(parseRemoteSpecifier("eissar/booru")).toEqual({
+        cloneUrl: "https://gitlab.example.com/eissar/booru",
+        host: "gitlab.example.com",
+        repoPath: "eissar/booru",
+        ref: undefined,
+      });
+    } finally {
+      if (prevHost === undefined) {
+        delete process.env.ABC_DEFAULT_HOST;
+      } else {
+        process.env.ABC_DEFAULT_HOST = prevHost;
+      }
+    }
+
     expect(() => parseRemoteSpecifier("/tmp/local/repo")).toThrow();
     expect(() => parseRemoteSpecifier("./local")).toThrow();
     expect(() => parseRemoteSpecifier("file:///tmp/repo")).toThrow();

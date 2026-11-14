@@ -49,6 +49,14 @@ export function resolveLibraryRoot(explicitLibrary?: string): string {
   return resolve(raw);
 }
 
+export function resolveDefaultHost(): string {
+  const raw = (process.env.ABC_DEFAULT_HOST ?? "https://github.com").trim();
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)
+    ? raw
+    : `https://${raw}`;
+  return withScheme.replace(/\/+$/, "");
+}
+
 export function parseRemoteSpecifier(remote: string): ParsedRemote {
   const trimmed = remote.trim();
   if (!trimmed) {
@@ -88,13 +96,19 @@ export function parseRemoteSpecifier(remote: string): ParsedRemote {
       host = scpMatch[2];
       rawPath = scpMatch[3];
     } else {
-      const bareMatch = /^([a-zA-Z0-9.-]+\.[a-zA-Z0-9-]+)\/(.+)$/.exec(cloneUrl);
-      if (!bareMatch) {
+      const bareHostMatch = /^([a-zA-Z0-9.-]+\.[a-zA-Z0-9-]+)\/(.+)$/.exec(cloneUrl);
+      if (bareHostMatch) {
+        host = bareHostMatch[1];
+        rawPath = bareHostMatch[2];
+        resolvedCloneUrl = `https://${cloneUrl}`;
+      } else if (/^[^/]+\/[^/]+/.test(cloneUrl)) {
+        const base = new URL(resolveDefaultHost());
+        host = base.hostname;
+        rawPath = `${base.pathname.replace(/\/+$/, "")}/${cloneUrl}`;
+        resolvedCloneUrl = `${resolveDefaultHost()}/${cloneUrl}`;
+      } else {
         throw new Error(`Unsupported remote specifier: ${remote}`);
       }
-      host = bareMatch[1];
-      rawPath = bareMatch[2];
-      resolvedCloneUrl = `https://${cloneUrl}`;
     }
   }
 
@@ -514,16 +528,16 @@ export function openPiCommand(
 function usage(): string {
   return [
     "Usage:",
-    "  abc [--library <dir>] root",
-    "  abc [--library <dir>] pi [args...]",
-    "  abc [--library <dir>] <remote> add",
-    "  abc [--library <dir>] <remote> run [prompt]",
-    "  abc [--library <dir>] <id|repo> ls [--json]",
-    "  abc [--library <dir>] <id> root",
-    "  abc [--library <dir>] <id> run [prompt]",
-    "  abc [--library <dir>] <id> pi [args...]",
-    "  abc [--library <dir>] <id> stop",
-    "  abc [--library <dir>] <id> rm [--force]",
+    "  abc root",
+    "  abc pi [args...]",
+    "  abc <remote> add",
+    "  abc <remote> run [prompt]",
+    "  abc <id|repo> ls [--json]",
+    "  abc <id> root",
+    "  abc <id> run [prompt]",
+    "  abc <id> pi [args...]",
+    "  abc <id> stop",
+    "  abc <id> rm [--force]",
   ].join("\n");
 }
 
