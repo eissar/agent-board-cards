@@ -17,7 +17,7 @@ Worktree library (e.g. `~/.local/share/abc/default/`):
 - `repos/<host>/<owner>/<repo>/` — bare clone of the remote URL (shared object store); the base commit ref is the merge head in this repo
 - `repos/<host>/<owner>/<repo>/info/exclude` — excludes `abc/` across all worktrees of this repo
 - `repos/<host>/<owner>/<repo>/abc/<id>.jsonl` — OpenHands `EventLog` (lives inside the bare repo, not inside the worktree)
-- `repos/<host>/<owner>/<repo>/abc/<id>.pid` — pidfile of the agent process running the card; absent or dead pid means not running, whatever the log says
+- `repos/<host>/<owner>/<repo>/abc/<id>.lock` — `flock` held by the agent process for its lifetime; lock not held (or file absent) means not running, whatever the log says. The kernel releases the lock on any exit, so there is no stale-pid / pid-reuse case
 - `repos/<host>/<owner>/<repo>/abc/hooks.json` — lifecycle hooks, per repo
 - `sessions/<timestamp>_<id>.jsonl` — Pi session, owns the agent's memory across rounds and the card's display title; status comes only from the `EventLog`
 - `worktrees/<id>/` — `git worktree` branched from `repos/<host>/<owner>/<repo>/` (never based on a local repo)
@@ -28,7 +28,11 @@ Inside each worktree:
 - `abc/PLAN.md`
 
 Launch:
-`pi --mode rpc --session-dir <library>/sessions --session-id <id>`
+`flock -n <repo>/abc/<id>.lock pi --mode rpc --session-dir <library>/sessions --session-id <id>`
+
+`flock` (no `-o`) passes the locked fd to `pi`, so the lock is held until `pi` exits. `-n` refuses to start a second agent on a running card.
+
+Liveness check: `flock -n <repo>/abc/<id>.lock true` succeeds ⇒ not running.
 
 Default prompt:
 `start by reading abc/PLAN.md and execute on the contents. note: abc/ is gitignored.`
