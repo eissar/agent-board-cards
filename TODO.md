@@ -1,3 +1,3 @@
 # TODO
 
-- [ ] **Crash liveness:** Prevent cards from staying stuck projecting `running` if `abcd` or a child agent process dies mid-run (e.g., PID/lock liveness check, and/or `abcd` appending `ConversationErrorEvent` on unexpected child exit).
+- [ ] **Pi → OpenHands event translation:** Map `pi --mode rpc --no-session` lifecycle events onto standard OpenHands events so `projectExecutionStatus(events)` reflects accurate terminal states—including emitting `ConversationStateUpdateEvent` (`execution_status: "finished"` / `"idle"`) on `agent_settled` and `ConversationErrorEvent` on abort or unexpected child/daemon exit (crash liveness).
