@@ -211,8 +211,10 @@ const DASHBOARD_HTML = `<!doctype html>
       <div style="font-weight:600;font-size:14px;">New card</div>
       <label for="remote">remote</label>
       <input id="remote" name="remote" placeholder="eissar/booru" required />
-      <label for="prompt">prompt (optional)</label>
-      <textarea id="prompt" name="prompt" rows="3" placeholder="defaults to abc/PLAN.md"></textarea>
+      <label for="model">model (optional)</label>
+      <input id="model" name="model" placeholder="default (e.g. antigravity/gemini-4-hydrogen)" />
+      <label for="prompt">plan (abc/PLAN.md)</label>
+      <textarea id="prompt" name="prompt" rows="3" placeholder="written to abc/PLAN.md"></textarea>
       <div class="dialog-actions">
         <button type="button" id="cancel-btn">cancel</button>
         <button type="submit" style="background:#238636;border-color:#2ea043;">run</button>
@@ -227,12 +229,13 @@ const DASHBOARD_HTML = `<!doctype html>
     form.onsubmit = async (e) => {
       e.preventDefault();
       const remote = document.getElementById("remote").value.trim();
+      const model = document.getElementById("model").value.trim();
       const prompt = document.getElementById("prompt").value.trim();
       if (!remote) return;
       const res = await fetch("/api/cards", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ remote, prompt: prompt || undefined }),
+        body: JSON.stringify({ remote, model: model || undefined, prompt: prompt || undefined }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -430,14 +433,15 @@ export async function startAbcd(options?: {
           const parsed = JSON.parse(body || "{}") as {
             remote?: string;
             prompt?: string;
+            model?: string;
           };
           if (!parsed.remote || typeof parsed.remote !== "string") {
             res.writeHead(400, { "content-type": "application/json" });
             res.end(JSON.stringify({ error: "remote is required" }));
             return;
           }
-          const card = createCard(library, parsed.remote);
-          runCardCommand(library, card.id, parsed.prompt);
+          const card = createCard(library, parsed.remote, parsed.prompt);
+          runCardCommand(library, card.id, undefined, parsed.model);
           res.writeHead(201, { "content-type": "application/json" });
           res.end(JSON.stringify({ id: card.id }));
         } catch (err) {

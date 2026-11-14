@@ -287,7 +287,11 @@ export function addRepo(
   return { bareRepoPath, host, repoPath, ref };
 }
 
-export function createCard(library: string, remote: string): CardPaths {
+export function createCard(
+  library: string,
+  remote: string,
+  prompt?: string,
+): CardPaths {
   const { bareRepoPath, ref } = addRepo(library, remote);
 
   let startPoint = "HEAD";
@@ -323,9 +327,7 @@ export function createCard(library: string, remote: string): CardPaths {
   const planDir = join(worktreePath, "abc");
   mkdirSync(planDir, { recursive: true });
   const planPath = join(planDir, "PLAN.md");
-  if (!existsSync(planPath)) {
-    writeFileSync(planPath, "", "utf8");
-  }
+  writeFileSync(planPath, prompt ? `${prompt}\n` : "", "utf8");
 
   return resolveCard(library, id);
 }
@@ -452,7 +454,11 @@ export function runCardCommand(
   library: string,
   id: string,
   prompt?: string,
+  model?: string,
 ): void {
+  if (prompt !== undefined) {
+    throw new Error("Unimplemented: follow-up prompt on existing card");
+  }
   const paths = resolveCard(library, id);
   if (isLockHeld(paths.lockPath)) {
     throw new Error(`Card "${id}" is already running`);
@@ -481,8 +487,9 @@ export function runCardCommand(
     paths.eventLogPath,
     "--card-id",
     id,
+    ...(model ? ["--model", model] : []),
     "-p",
-    prompt ?? DEFAULT_CARD_PROMPT,
+    DEFAULT_CARD_PROMPT,
   ];
 
   const child = spawn("flock", runnerArgs, {
@@ -539,16 +546,43 @@ export function openPiCommand(
   return res.status ?? 1;
 }
 
+function extractRunArgs(args: string[]): {
+  model?: string;
+  prompt?: string;
+} {
+  let model: string | undefined;
+  const promptParts: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--model") {
+      const next = args[i + 1];
+      if (!next) {
+        throw new Error("--model requires a value");
+      }
+      model = next;
+      i += 1;
+    } else if (arg.startsWith("--model=")) {
+      model = arg.slice("--model=".length);
+    } else {
+      promptParts.push(arg);
+    }
+  }
+  return {
+    model,
+    prompt: promptParts.length > 0 ? promptParts.join(" ") : undefined,
+  };
+}
+
 function usage(): string {
   return [
     "Usage:",
     "  abc root",
     "  abc pi [args...]",
     "  abc <remote> add",
-    "  abc <remote> run [prompt]",
+    "  abc <remote> run [--model <m>] [prompt]",
     "  abc <id|repo> ls [--json]",
     "  abc <id> root",
-    "  abc <id> run [prompt]",
+    "  abc <id> run [--model <m>] [prompt]",
     "  abc <id> pi [args...]",
     "  abc <id> stop",
     "  abc <id> rm [--force]",
@@ -657,14 +691,13 @@ export function runCli(argv: string[]): number {
       return 0;
     }
     case "run": {
-      const promptParts = rest.slice(2);
-      const prompt = promptParts.length > 0 ? promptParts.join(" ") : undefined;
+      const { model, prompt } = extractRunArgs(rest.slice(2));
       if (target.includes("/") || target.includes(":")) {
-        const card = createCard(library, target);
-        runCardCommand(library, card.id, prompt);
+        const card = createCard(library, target, prompt);
+        runCardCommand(library, card.id, undefined, model);
         console.log(card.id);
       } else {
-        runCardCommand(library, target, prompt);
+        runCardCommand(library, target, prompt, model);
         console.log(target);
       }
       return 0;
