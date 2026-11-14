@@ -124,6 +124,11 @@ describe("abcd daemon", () => {
       const html = await htmlRes.text();
       expect(html).toContain("<h1>abc</h1>");
       expect(html).toContain('id="new-btn"');
+      expect(html).toContain('id="remote-select"');
+
+      const reposRes = await fetch(`${server.url}/api/repos`);
+      expect(reposRes.status).toBe(200);
+      expect(await reposRes.json()).toEqual(["github.com/org/repo"]);
 
       const listRes = await fetch(`${server.url}/api/cards`);
       expect(listRes.status).toBe(200);

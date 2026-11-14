@@ -450,6 +450,14 @@ function requireAbcdSocket(library: string): string {
   return socketPath;
 }
 
+function requirePiBin(): string {
+  const piBin = process.env.ABC_PI_BIN ?? "pi";
+  if (!Bun.which(piBin)) {
+    throw new Error(`Fatal precondition: "${piBin}" not found in PATH`);
+  }
+  return piBin;
+}
+
 export function runCardCommand(
   library: string,
   id: string,
@@ -464,12 +472,12 @@ export function runCardCommand(
     throw new Error(`Card "${id}" is already running`);
   }
   const socketPath = requireAbcdSocket(library);
+  const piBin = requirePiBin();
   mkdirSync(dirname(paths.lockPath), { recursive: true });
   mkdirSync(join(library, "sessions"), { recursive: true });
 
   const selfDir = dirname(fileURLToPath(import.meta.url));
   const extensionDir = resolve(selfDir, "pi-session-mgr");
-  const piBin = process.env.ABC_PI_BIN ?? "pi";
 
   const runnerArgs = [
     "-n",
@@ -510,12 +518,12 @@ export function openPiCommand(
     throw new Error(`Card "${id}" is already running`);
   }
   const socketPath = requireAbcdSocket(library);
+  const piBin = requirePiBin();
   mkdirSync(dirname(paths.lockPath), { recursive: true });
   mkdirSync(join(library, "sessions"), { recursive: true });
 
   const selfDir = dirname(fileURLToPath(import.meta.url));
   const extensionDir = resolve(selfDir, "pi-session-mgr");
-  const piBin = process.env.ABC_PI_BIN ?? "pi";
 
   const args = [
     "-n",
@@ -631,7 +639,7 @@ export function runCli(argv: string[]): number {
   if (first === "pi") {
     const selfDir = dirname(fileURLToPath(import.meta.url));
     const extensionDir = resolve(selfDir, "pi-session-mgr");
-    const piBin = process.env.ABC_PI_BIN ?? "pi";
+    const piBin = requirePiBin();
     const extra = rest[1] === "--" ? rest.slice(2) : rest.slice(1);
     const res = spawnSync(
       piBin,

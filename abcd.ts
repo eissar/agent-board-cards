@@ -68,6 +68,27 @@ function appendEvents(
   }
 }
 
+function listAllRepos(library: string): string[] {
+  const reposRoot = join(library, "repos");
+  if (!existsSync(reposRoot)) {
+    return [];
+  }
+  const results: string[] = [];
+  const walk = (dir: string, rel: string) => {
+    if (existsSync(join(dir, "HEAD")) && existsSync(join(dir, "objects"))) {
+      if (rel) results.push(rel);
+      return;
+    }
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        walk(join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
+      }
+    }
+  };
+  walk(reposRoot, "");
+  return results.sort();
+}
+
 function listAllCards(library: string) {
   const worktreesDir = join(library, "worktrees");
   if (!existsSync(worktreesDir)) {
@@ -209,8 +230,9 @@ const DASHBOARD_HTML = `<!doctype html>
   <dialog id="new-dialog">
     <form id="new-form">
       <div style="font-weight:600;font-size:14px;">New card</div>
-      <label for="remote">remote</label>
-      <input id="remote" name="remote" placeholder="eissar/booru" required />
+      <label for="remote-select">remote</label>
+      <select id="remote-select" style="width:100%;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:6px 8px;font-family:inherit;font-size:13px;"></select>
+      <input id="remote" name="remote" placeholder="eissar/booru" style="display:none;margin-top:6px;" />
       <label for="model">model (optional)</label>
       <input id="model" name="model" placeholder="default (e.g. antigravity/gemini-4-hydrogen)" />
       <label for="prompt">plan (abc/PLAN.md)</label>
@@ -224,11 +246,36 @@ const DASHBOARD_HTML = `<!doctype html>
   <script>
     const dlg = document.getElementById("new-dialog");
     const form = document.getElementById("new-form");
-    document.getElementById("new-btn").onclick = () => { dlg.showModal(); document.getElementById("remote").focus(); };
+    const remoteSelect = document.getElementById("remote-select");
+    const remoteInput = document.getElementById("remote");
+    function syncRemoteInput() {
+      const isCustom = remoteSelect.value === "__custom__";
+      remoteInput.style.display = isCustom ? "block" : "none";
+      remoteInput.required = isCustom;
+      if (isCustom) remoteInput.focus();
+    }
+    remoteSelect.onchange = syncRemoteInput;
+    document.getElementById("new-btn").onclick = async () => {
+      const repos = await fetch("/api/repos").then((r) => r.json()).catch(() => []);
+      remoteSelect.innerHTML = "";
+      for (const repo of repos) {
+        const opt = document.createElement("option");
+        opt.value = repo;
+        opt.textContent = repo;
+        remoteSelect.appendChild(opt);
+      }
+      const customOpt = document.createElement("option");
+      customOpt.value = "__custom__";
+      customOpt.textContent = "other...";
+      remoteSelect.appendChild(customOpt);
+      remoteSelect.value = repos.length > 0 ? repos[0] : "__custom__";
+      syncRemoteInput();
+      dlg.showModal();
+    };
     document.getElementById("cancel-btn").onclick = () => dlg.close();
     form.onsubmit = async (e) => {
       e.preventDefault();
-      const remote = document.getElementById("remote").value.trim();
+      const remote = (remoteSelect.value === "__custom__" ? remoteInput.value : remoteSelect.value).trim();
       const model = document.getElementById("model").value.trim();
       const prompt = document.getElementById("prompt").value.trim();
       if (!remote) return;
@@ -246,13 +293,33 @@ const DASHBOARD_HTML = `<!doctype html>
       dlg.close();
       refresh();
     };
+    const tbody = document.getElementById("rows");
+    let lastJson = "";
+    tbody.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      const stopId = btn.dataset.stop;
+      const runId = btn.dataset.run;
+      if (!stopId && !runId) return;
+      btn.disabled = true;
+      const url = stopId ? "/api/cards/" + stopId + "/stop" : "/api/cards/" + runId + "/run";
+      const res = await fetch(url, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Request failed");
+      }
+      lastJson = "";
+      refresh();
+    });
     async function refresh() {
       const res = await fetch("/api/cards");
-      const cards = await res.json();
+      const text = await res.text();
+      if (text === lastJson) return;
+      lastJson = text;
+      const cards = JSON.parse(text);
       const counts = cards.reduce((acc, c) => ((acc[c.status] = (acc[c.status] || 0) + 1), acc), {});
       document.getElementById("stats").textContent =
         cards.length + " cards · " + Object.entries(counts).map(([k, v]) => v + " " + k).join(", ");
-      const tbody = document.getElementById("rows");
       tbody.innerHTML = "";
       for (const c of cards) {
         const tr = document.createElement("tr");
@@ -268,12 +335,6 @@ const DASHBOARD_HTML = `<!doctype html>
             : "<button data-run='" + c.id + "'>run</button>") + "</td>";
         tbody.appendChild(tr);
       }
-      tbody.querySelectorAll("button[data-stop]").forEach((btn) => {
-        btn.onclick = async () => { await fetch("/api/cards/" + btn.dataset.stop + "/stop", { method: "POST" }); refresh(); };
-      });
-      tbody.querySelectorAll("button[data-run]").forEach((btn) => {
-        btn.onclick = async () => { await fetch("/api/cards/" + btn.dataset.run + "/run", { method: "POST" }); refresh(); };
-      });
     }
     refresh();
     setInterval(refresh, 2000);
@@ -414,6 +475,12 @@ export async function startAbcd(options?: {
     if (method === "GET" && urlPath === "/") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(DASHBOARD_HTML);
+      return;
+    }
+
+    if (method === "GET" && urlPath === "/api/repos") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(listAllRepos(library)));
       return;
     }
 
