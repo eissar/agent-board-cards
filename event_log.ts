@@ -212,6 +212,59 @@ function isValidTextContentArray(value: unknown): value is OpenHandsTextContent[
   );
 }
 
+const BASE_EVENT_KEYS = ["id", "timestamp", "source", "parent_id", "kind"] as const;
+
+const ALLOWED_KEYS_BY_KIND: Record<string, ReadonlySet<string>> = {
+  MessageEvent: new Set([
+    ...BASE_EVENT_KEYS,
+    "llm_message",
+    "llm_response_id",
+    "activated_skills",
+    "extended_content",
+    "sender",
+  ]),
+  ActionEvent: new Set([
+    ...BASE_EVENT_KEYS,
+    "thought",
+    "reasoning_content",
+    "thinking_blocks",
+    "action",
+    "tool_name",
+    "tool_call_id",
+    "tool_call",
+    "llm_response_id",
+  ]),
+  ObservationEvent: new Set([
+    ...BASE_EVENT_KEYS,
+    "tool_name",
+    "tool_call_id",
+    "observation",
+    "action_id",
+    "extended_content",
+  ]),
+  AgentErrorEvent: new Set([
+    ...BASE_EVENT_KEYS,
+    "tool_name",
+    "tool_call_id",
+    "error",
+  ]),
+  PauseEvent: new Set(BASE_EVENT_KEYS),
+  InterruptEvent: new Set(BASE_EVENT_KEYS),
+  ConversationErrorEvent: new Set([...BASE_EVENT_KEYS, "code", "detail"]),
+  ConversationStateUpdateEvent: new Set([...BASE_EVENT_KEYS, "key", "value"]),
+};
+
+function hasOnlyAllowedKeys(
+  record: Record<string, unknown>,
+  kind: string,
+): boolean {
+  const allowed = ALLOWED_KEYS_BY_KIND[kind];
+  if (!allowed) {
+    return false;
+  }
+  return Object.keys(record).every((key) => allowed.has(key));
+}
+
 /**
  * Strictly validates an event being emitted against v1.62.0 OpenHands schemas.
  * Unknown event kinds are rejected on emit.
@@ -224,6 +277,9 @@ export function validateEmittedEvent(
   }
 
   const record = event as unknown as Record<string, unknown>;
+  if (!hasOnlyAllowedKeys(record, event.kind)) {
+    return false;
+  }
 
   switch (event.kind) {
     case "MessageEvent": {
