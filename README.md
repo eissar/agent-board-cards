@@ -16,7 +16,7 @@ Vendored Python event envelope files in `vendor/openhands/v1.62.0/event/` are fr
 Worktree library (e.g. `~/.local/share/abc/default/`):
 - `repos/<host>/<owner>/<repo>/` — bare clone of the remote URL (shared object store); the base commit ref is the merge head in this repo
 - `repos/<host>/<owner>/<repo>/info/exclude` — excludes `abc/` across all worktrees of this repo
-- `repos/<host>/<owner>/<repo>/abc/<id>.jsonl` — OpenHands `EventLog` (lives inside the bare repo, not inside the worktree)
+- `repos/<host>/<owner>/<repo>/abc/<id>.jsonl` — OpenHands `EventLog` (lives inside the bare repo, not inside the worktree); see: openhands sessionmanager
 - `repos/<host>/<owner>/<repo>/abc/<id>.lock` — `flock` held by the agent process for its lifetime; lock not held (or file absent) means not running, whatever the log says. The kernel releases the lock on any exit, so there is no stale-pid / pid-reuse case
 - `repos/<host>/<owner>/<repo>/abc/hooks.json` — lifecycle hooks, per repo
 - `sessions/<timestamp>_<id>.jsonl` — Pi session, owns the agent's memory across rounds and the card's display title; status comes only from the `EventLog`
@@ -27,10 +27,11 @@ Worktree library (e.g. `~/.local/share/abc/default/`):
 Inside each worktree:
 - `abc/PLAN.md`
 
-Launch:
-`flock -n <repo>/abc/<id>.lock pi --mode rpc --session-dir <library>/sessions --session-id <id>`
+Runner & Launch:
+- Card runner uses `@earendil-works/pi-coding-agent` SDK (`createAgentSession`) in Node/Bun with a custom `SessionManager` so the OpenHands reducer runs in-process against `abc/<id>.jsonl` (no `pi --mode rpc` subprocess).
+- `flock -n <repo>/abc/<id>.lock <bun|node> <runner> --session-dir <library>/sessions --session-id <id>`
 
-`flock` (no `-o`) passes the locked fd to `pi`, so the lock is held until `pi` exits. `-n` refuses to start a second agent on a running card.
+`flock` (no `-o`) passes the locked fd to the runner process, so the lock is held until it exits. `-n` refuses to start a second agent on a running card.
 
 Liveness check: `flock -n <repo>/abc/<id>.lock true` succeeds ⇒ not running.
 
