@@ -1,0 +1,11 @@
+{
+  "name": "abc",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test session_manager_test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^1.3.0"
+  }
+}
