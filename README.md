@@ -11,6 +11,16 @@ Vendored Python event envelope files in `vendor/openhands/v1.62.0/event/` are fr
 - `prefix` :: agents are prefixed by git remote URL (scanned from worktrees; worktrees are never based on local repos).
 - `type` :: agents are organized by their deliverable (`patch file` | `working area changes` | `markdown`). Currently `working area changes` (worktree) only.
 
+## Multiple cards
+
+Card subcommands take any number of ids before the subcommand:
+
+    abc 2d082 e6894 rm
+    abc 2d082 e6894 stop
+    abc 2d082 e6894 ls --json
+
+`rm` resolves and liveness-checks all targets before deleting any of them.
+
 ## Layout
 
 Worktree library (e.g. `~/.local/share/abc/default/`):

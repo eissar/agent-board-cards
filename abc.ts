@@ -404,16 +404,8 @@ export function stopCard(library: string, id: string): {
   return { stopped: true, pids };
 }
 
-export function rmCard(
-  library: string,
-  id: string,
-  options?: { force?: boolean },
-): void {
-  const paths = resolveCard(library, id);
-  if (isLockHeld(paths.lockPath) && !options?.force) {
-    throw new Error(`Card "${id}" is currently running (use --force to remove)`);
-  }
-
+function removeCardFiles(library: string, paths: CardPaths): void {
+  const id = paths.id;
   if (existsSync(paths.worktreePath)) {
     const removeRes = spawnSync(
       "git",
@@ -437,6 +429,36 @@ export function rmCard(
   }
   rmSync(paths.eventLogPath, { force: true });
   rmSync(paths.lockPath, { force: true });
+}
+
+export function rmCard(
+  library: string,
+  id: string,
+  options?: { force?: boolean },
+): void {
+  const paths = resolveCard(library, id);
+  if (isLockHeld(paths.lockPath) && !options?.force) {
+    throw new Error(`Card "${id}" is currently running (use --force to remove)`);
+  }
+  removeCardFiles(library, paths);
+}
+
+export function rmCards(
+  library: string,
+  ids: string[],
+  options?: { force?: boolean },
+): void {
+  // Resolve and check every card before deleting anything, so an invalid or
+  // running target does not leave the library half-removed.
+  const resolved = ids.map((id) => ({ id, paths: resolveCard(library, id) }));
+  for (const { id, paths } of resolved) {
+    if (isLockHeld(paths.lockPath) && !options?.force) {
+      throw new Error(`Card "${id}" is currently running (use --force to remove)`);
+    }
+  }
+  for (const { paths } of resolved) {
+    removeCardFiles(library, paths);
+  }
 }
 
 export const DEFAULT_CARD_PROMPT =
@@ -581,19 +603,38 @@ function extractRunArgs(args: string[]): {
   };
 }
 
+const SUBCOMMANDS = new Set(["add", "root", "ls", "run", "pi", "stop", "rm"]);
+
+function splitCommand(args: string[]): {
+  targets: string[];
+  sub?: string;
+  subArgs: string[];
+} {
+  for (let i = 1; i < args.length; i++) {
+    if (SUBCOMMANDS.has(args[i])) {
+      return {
+        targets: args.slice(0, i),
+        sub: args[i],
+        subArgs: args.slice(i + 1),
+      };
+    }
+  }
+  return { targets: args, sub: undefined, subArgs: [] };
+}
+
 function usage(): string {
   return [
     "Usage:",
     "  abc root",
     "  abc pi [args...]",
-    "  abc <remote> add",
+    "  abc <remote> [remote...] add",
     "  abc <remote> run [--model <m>] [prompt]",
-    "  abc <id|repo> ls [--json]",
-    "  abc <id> root",
+    "  abc <id|repo> [<id|repo>...] ls [--json]",
+    "  abc <id> [<id>...] root",
     "  abc <id> run [--model <m>] [prompt]",
-    "  abc <id> pi [args...]",
-    "  abc <id> stop",
-    "  abc <id> rm [--force]",
+    "  abc <id> [<id>...] pi [args...]",
+    "  abc <id> [<id>...] stop",
+    "  abc <id> [<id>...] rm [--force]",
   ].join("\n");
 }
 
@@ -652,8 +693,7 @@ export function runCli(argv: string[]): number {
     return res.status ?? 1;
   }
 
-  const target = first;
-  const sub = rest[1];
+  const { targets, sub, subArgs } = splitCommand(rest);
   if (!sub) {
     console.error(usage());
     return 2;
@@ -661,69 +701,92 @@ export function runCli(argv: string[]): number {
 
   switch (sub) {
     case "add": {
-      const repo = addRepo(library, target);
-      console.log(repo.bareRepoPath);
+      for (const target of targets) {
+        const repo = addRepo(library, target);
+        console.log(repo.bareRepoPath);
+      }
       return 0;
     }
     case "root": {
-      const card = resolveCard(library, target);
-      console.log(card.bareRepoPath);
+      for (const target of targets) {
+        const card = resolveCard(library, target);
+        console.log(card.bareRepoPath);
+      }
       return 0;
     }
     case "ls": {
-      const json = rest.includes("--json");
-      if (target.includes("/")) {
-        const cards = listRepoCards(library, target);
-        if (json) {
-          console.log(JSON.stringify(cards, null, 2));
-        } else {
-          for (const card of cards) {
-            console.log(`${card.id}\t${card.status}\t${card.worktreePath}`);
+      const json = subArgs.includes("--json");
+      const results: unknown[] = [];
+      for (const target of targets) {
+        if (target.includes("/")) {
+          const cards = listRepoCards(library, target);
+          if (json) {
+            results.push(...cards);
+          } else {
+            for (const card of cards) {
+              console.log(`${card.id}\t${card.status}\t${card.worktreePath}`);
+            }
           }
+          continue;
         }
-        return 0;
+        const info = listCard(library, target);
+        if (json) {
+          results.push(info);
+        } else {
+          console.log(`id: ${info.id}`);
+          console.log(`status: ${info.status}`);
+          console.log(`alive: ${info.alive}`);
+          console.log(`worktree: ${info.worktreePath}`);
+          console.log(`repo: ${info.bareRepoPath}`);
+          console.log(`session: ${info.sessionPath ?? "-"}`);
+          console.log(`event_log: ${info.eventLogPath}`);
+          console.log(`lock: ${info.lockPath}`);
+        }
       }
-      const info = listCard(library, target);
       if (json) {
-        console.log(JSON.stringify(info, null, 2));
-      } else {
-        console.log(`id: ${info.id}`);
-        console.log(`status: ${info.status}`);
-        console.log(`alive: ${info.alive}`);
-        console.log(`worktree: ${info.worktreePath}`);
-        console.log(`repo: ${info.bareRepoPath}`);
-        console.log(`session: ${info.sessionPath ?? "-"}`);
-        console.log(`event_log: ${info.eventLogPath}`);
-        console.log(`lock: ${info.lockPath}`);
+        console.log(
+          JSON.stringify(targets.length === 1 ? results[0] : results, null, 2),
+        );
       }
       return 0;
     }
     case "run": {
-      const { model, prompt } = extractRunArgs(rest.slice(2));
-      if (target.includes("/") || target.includes(":")) {
-        const card = createCard(library, target, prompt);
-        runCardCommand(library, card.id, undefined, model);
-        console.log(card.id);
-      } else {
-        runCardCommand(library, target, prompt, model);
-        console.log(target);
+      const { model, prompt } = extractRunArgs(subArgs);
+      for (const target of targets) {
+        if (target.includes("/") || target.includes(":")) {
+          const card = createCard(library, target, prompt);
+          runCardCommand(library, card.id, undefined, model);
+          console.log(card.id);
+        } else {
+          runCardCommand(library, target, prompt, model);
+          console.log(target);
+        }
       }
       return 0;
     }
     case "pi": {
-      return openPiCommand(library, target, rest.slice(2));
+      let status = 0;
+      for (const target of targets) {
+        const result = openPiCommand(library, target, subArgs);
+        if (status === 0) {
+          status = result;
+        }
+      }
+      return status;
     }
     case "stop": {
-      const result = stopCard(library, target);
-      if (!result.stopped) {
-        console.error(`Card ${target} is not running`);
-        return 1;
+      let status = 0;
+      for (const target of targets) {
+        const result = stopCard(library, target);
+        if (!result.stopped) {
+          console.error(`Card ${target} is not running`);
+          status = 1;
+        }
       }
-      return 0;
+      return status;
     }
     case "rm": {
-      const force = rest.includes("--force");
-      rmCard(library, target, { force });
+      rmCards(library, targets, { force: subArgs.includes("--force") });
       return 0;
     }
     default: {

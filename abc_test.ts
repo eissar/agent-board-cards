@@ -28,13 +28,15 @@ function makeTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-function createFixtureCard(library: string, id = "a1b2c"): {
+interface FixtureCard {
   bareRepoPath: string;
   worktreePath: string;
   sessionPath: string;
   eventLogPath: string;
   lockPath: string;
-} {
+}
+
+function createFixtureRepo(library: string): string {
   const bareRepoPath = join(library, "repos", "github.com", "org", "repo");
   mkdirSync(bareRepoPath, { recursive: true });
   spawnSync("git", ["init", "--bare", bareRepoPath], { stdio: "ignore" });
@@ -54,7 +56,14 @@ function createFixtureCard(library: string, id = "a1b2c"): {
   rmSync(seedDir, { recursive: true, force: true });
 
   ensureRepoExclude(bareRepoPath);
+  return bareRepoPath;
+}
 
+function createFixtureWorktree(
+  library: string,
+  bareRepoPath: string,
+  id: string,
+): FixtureCard {
   const worktreePath = join(library, "worktrees", id);
   mkdirSync(join(library, "worktrees"), { recursive: true });
   const wtRes = spawnSync(
@@ -78,6 +87,10 @@ function createFixtureCard(library: string, id = "a1b2c"): {
   const lockPath = join(bareRepoPath, "abc", `${id}.lock`);
 
   return { bareRepoPath, worktreePath, sessionPath, eventLogPath, lockPath };
+}
+
+function createFixtureCard(library: string, id = "a1b2c"): FixtureCard {
+  return createFixtureWorktree(library, createFixtureRepo(library), id);
 }
 
 describe("abc CLI", () => {
@@ -265,6 +278,84 @@ describe("abc CLI", () => {
       expect(existsSync(fixture.eventLogPath)).toBe(false);
       expect(existsSync(fixture.lockPath)).toBe(false);
     } finally {
+      rmSync(lib, { recursive: true, force: true });
+    }
+  });
+
+  test("rm accepts N ids and checks every target before removing any", () => {
+    const lib = makeTempDir("abc-rm-many-");
+    try {
+      const repo = createFixtureRepo(lib);
+      const first = createFixtureWorktree(lib, repo, "aa111");
+      const second = createFixtureWorktree(lib, repo, "bb222");
+      const third = createFixtureWorktree(lib, repo, "cc333");
+
+      expect(() =>
+        runCli(["--library", lib, "aa111", "fffff", "rm"]),
+      ).toThrow(/not found/);
+      expect(existsSync(first.worktreePath)).toBe(true);
+      expect(existsSync(second.worktreePath)).toBe(true);
+      expect(existsSync(third.worktreePath)).toBe(true);
+
+      expect(
+        runCli(["--library", lib, "aa111", "bb222", "cc333", "rm"]),
+      ).toBe(0);
+      for (const fixture of [first, second, third]) {
+        expect(existsSync(fixture.worktreePath)).toBe(false);
+        expect(existsSync(fixture.sessionPath)).toBe(false);
+        expect(existsSync(fixture.eventLogPath)).toBe(false);
+        expect(existsSync(fixture.lockPath)).toBe(false);
+      }
+      expect(listRepoCards(lib, "github.com/org/repo")).toEqual([]);
+    } finally {
+      rmSync(lib, { recursive: true, force: true });
+    }
+  });
+
+  test("stop accepts N ids; batch rm requires --force while any is running", async () => {
+    const lib = makeTempDir("abc-batch-locks-");
+    const children: Array<ReturnType<typeof spawn>> = [];
+    try {
+      const repo = createFixtureRepo(lib);
+      const first = createFixtureWorktree(lib, repo, "dd111");
+      const second = createFixtureWorktree(lib, repo, "ee222");
+      for (const fixture of [first, second]) {
+        children.push(
+          spawn("flock", ["-n", fixture.lockPath, "sleep", "30"], {
+            stdio: "ignore",
+          }),
+        );
+      }
+      for (let i = 0; i < 40 && !isLockHeld(first.lockPath); i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      for (let i = 0; i < 40 && !isLockHeld(second.lockPath); i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(isLockHeld(first.lockPath)).toBe(true);
+      expect(isLockHeld(second.lockPath)).toBe(true);
+
+      expect(() => runCli(["--library", lib, "dd111", "ee222", "rm"])).toThrow(
+        /currently running/,
+      );
+      expect(existsSync(first.worktreePath)).toBe(true);
+      expect(existsSync(second.worktreePath)).toBe(true);
+
+      expect(runCli(["--library", lib, "dd111", "ee222", "stop"])).toBe(0);
+      expect(isLockHeld(first.lockPath)).toBe(false);
+      expect(isLockHeld(second.lockPath)).toBe(false);
+
+      expect(
+        runCli(["--library", lib, "dd111", "ee222", "rm", "--force"]),
+      ).toBe(0);
+      expect(existsSync(first.worktreePath)).toBe(false);
+      expect(existsSync(second.worktreePath)).toBe(false);
+    } finally {
+      for (const child of children) {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
       rmSync(lib, { recursive: true, force: true });
     }
   });
